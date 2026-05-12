@@ -1,2 +1,2 @@
-tobii-research
-websockets
+tobii_research>=1.10
+websockets>=12.0
