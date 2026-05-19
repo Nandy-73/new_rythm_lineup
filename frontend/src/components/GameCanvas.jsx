@@ -27,6 +27,7 @@ const CHECKPOINT_XS = [
 const CHECKPOINT_BONUS = 500;
 const MISS_PENALTY     = 200;
 const BLINK_WINDOW     = 4.5;
+const ZONE_MAX_FRAC    = 0.06;
 const SEGMENT_BONUS    = 1000;
 
 function getEffSpeed(D) { return BASE_SPEED * (0.70 + D * 0.60); }
@@ -197,6 +198,43 @@ function makeCheckpoints() {
   }));
 }
 
+// ─── Draw: Blink zone ─────────────────────────────────────────────────────────
+function zoneColor(urgency) {
+  let r, g, b;
+  if (urgency < 0.5) {
+    r = Math.round(40 + 215 * (urgency * 2)); g = 220; b = Math.round(80 * (1 - urgency * 2));
+  } else {
+    r = 255; g = Math.round(220 * (1 - (urgency - 0.5) * 2)); b = 0;
+  }
+  return { r, g, b };
+}
+
+function drawBlinkZone(ctx, checkpoints, W, H, ts, progress) {
+  const ZONE_MAX = W * ZONE_MAX_FRAC;
+  const cursorX  = progress * W;
+  const nextCp   = checkpoints
+    .filter(c => !c.cleared && !c.missed && c.x > progress)
+    .sort((a, b) => a.x - b.x)[0];
+  if (!nextCp) return;
+  const sx   = nextCp.x * W;
+  const dist = sx - cursorX;
+  if (dist <= 0 || dist >= ZONE_MAX) return;
+  const urgency  = 1 - dist / ZONE_MAX;
+  const { r, g, b } = zoneColor(urgency);
+  const zonePulse = 0.55 + 0.45 * Math.sin(ts * 0.014);
+  const zoneLeft  = Math.max(cursorX, sx - ZONE_MAX);
+  const zoneW     = sx - zoneLeft;
+  ctx.save();
+  const hGrad = ctx.createLinearGradient(zoneLeft, 0, sx, 0);
+  hGrad.addColorStop(0,    `rgba(${r},${g},${b},0.0)`);
+  hGrad.addColorStop(0.3,  `rgba(${r},${g},${b},${0.15 * zonePulse})`);
+  hGrad.addColorStop(0.75, `rgba(${r},${g},${b},${0.45 * zonePulse})`);
+  hGrad.addColorStop(1,    `rgba(${r},${g},${b},${0.72 * zonePulse})`);
+  ctx.fillStyle = hGrad;
+  ctx.fillRect(zoneLeft, 0, zoneW, H);
+  ctx.restore();
+}
+
 // ─── Draw: Background ─────────────────────────────────────────────────────────
 function drawBg(ctx, W, H) {
   const g = ctx.createLinearGradient(0, 0, 0, H);
@@ -293,76 +331,26 @@ function drawPath(ctx, path, progress, W, H, onTrack, effTol) {
   ctx.fill();
 }
 
-// ─── Draw: Blink zone (rendered BEFORE path so it never covers it) ────────────
-const ZONE_MAX_FRAC = 0.06; // matches activation threshold → zone & line appear simultaneously
-
-function zoneColor(urgency) {
-  // urgency 0=far (green) → 0.5=mid (yellow) → 1=close (red)
-  let r, g, b;
-  if (urgency < 0.5) {
-    r = Math.round(40 + 215 * (urgency * 2));
-    g = 220;
-    b = Math.round(80 * (1 - urgency * 2));
-  } else {
-    r = 255;
-    g = Math.round(220 * (1 - (urgency - 0.5) * 2));
-    b = 0;
-  }
-  return { r, g, b };
-}
-
-function drawBlinkZone(ctx, checkpoints, W, H, ts, progress) {
-  const ZONE_MAX = W * ZONE_MAX_FRAC;
-  const cursorX  = progress * W;
-  const nextCp   = checkpoints
-    .filter(c => !c.cleared && !c.missed && c.x > progress)
-    .sort((a, b) => a.x - b.x)[0];
-  if (!nextCp) return;
-
-  const sx   = nextCp.x * W;
-  const dist = sx - cursorX;
-  if (dist <= 0 || dist >= ZONE_MAX) return;
-
-  const urgency = 1 - dist / ZONE_MAX;
-  const { r, g, b } = zoneColor(urgency);
-  const zonePulse = 0.55 + 0.45 * Math.sin(ts * 0.014);
-  const zoneLeft  = Math.max(cursorX, sx - ZONE_MAX);
-  const zoneW     = sx - zoneLeft;
-
-  ctx.save();
-  const hGrad = ctx.createLinearGradient(zoneLeft, 0, sx, 0);
-  hGrad.addColorStop(0,    `rgba(${r},${g},${b},0.0)`);
-  hGrad.addColorStop(0.3,  `rgba(${r},${g},${b},${0.15 * zonePulse})`);
-  hGrad.addColorStop(0.75, `rgba(${r},${g},${b},${0.45 * zonePulse})`);
-  hGrad.addColorStop(1,    `rgba(${r},${g},${b},${0.72 * zonePulse})`);
-  ctx.fillStyle = hGrad;
-  ctx.fillRect(zoneLeft, 0, zoneW, H);
-  ctx.restore();
-}
-
 // ─── Draw: Checkpoints ────────────────────────────────────────────────────────
 function drawCheckpoints(ctx, path, checkpoints, W, H, ts, progress) {
-  const ZONE_MAX = W * ZONE_MAX_FRAC;
-  const cursorX  = progress * W;
-
   checkpoints.forEach(cp => {
-    if (cp.cleared) return;
+    if (cp.cleared || cp.missed) return;
     const sx    = cp.x * W;
     const py    = (getPathY(path, cp.x) ?? 0.5) * H;
     const halfH = PATH_W * 1.0;
-    const dist  = sx - cursorX;
+    const dist  = sx - progress * W;
+    if (dist <= 0) return;
 
-    // ── Checkpoint line ──────────────────────────────────────────────────────
     if (cp.active) {
-      const urgency = Math.max(0, Math.min(1, 1 - dist / ZONE_MAX));
+      const urgency = Math.max(0, Math.min(1, 1 - cp.windowTimer / BLINK_WINDOW));
       const { r, g, b } = zoneColor(urgency);
-      const lc  = `rgb(${r},${g},${b})`;
-      const lca = (a) => `rgba(${r},${g},${b},${a})`;
+      const col   = `rgb(${r},${g},${b})`;
+      const colA  = `rgba(${r},${g},${b},0.45)`;
       const pulse = 0.72 + 0.28 * Math.sin(ts * 0.010);
 
       ctx.save();
       const aura = ctx.createRadialGradient(sx, py, 0, sx, py, halfH * 1.7);
-      aura.addColorStop(0, lca(0.18 * pulse));
+      aura.addColorStop(0, `rgba(${r},${g},${b},${0.12 * pulse})`);
       aura.addColorStop(1, "transparent");
       ctx.fillStyle = aura;
       ctx.fillRect(sx - halfH * 1.7, py - halfH * 1.7, halfH * 3.4, halfH * 3.4);
@@ -370,9 +358,9 @@ function drawCheckpoints(ctx, path, checkpoints, W, H, ts, progress) {
 
       ctx.save();
       ctx.globalAlpha = 0.82 + 0.18 * Math.sin(ts * 0.013);
-      ctx.shadowColor = lc;
+      ctx.shadowColor = col;
       ctx.shadowBlur  = 20;
-      ctx.strokeStyle = lc;
+      ctx.strokeStyle = col;
       ctx.lineWidth   = 3;
       [-5, 5].forEach(dx => {
         ctx.beginPath();
@@ -381,7 +369,7 @@ function drawCheckpoints(ctx, path, checkpoints, W, H, ts, progress) {
         ctx.stroke();
       });
       ctx.lineWidth   = 1.5;
-      ctx.strokeStyle = lca(0.45);
+      ctx.strokeStyle = colA;
       ctx.setLineDash([8, 6]);
       ctx.beginPath();
       ctx.moveTo(sx, py - halfH);
@@ -392,8 +380,8 @@ function drawCheckpoints(ctx, path, checkpoints, W, H, ts, progress) {
       ctx.restore();
 
       ctx.save();
-      ctx.fillStyle   = lc;
-      ctx.shadowColor = lc;
+      ctx.fillStyle   = col;
+      ctx.shadowColor = col;
       ctx.shadowBlur  = 14;
       [py - halfH, py + halfH].forEach(dy => {
         ctx.beginPath();
@@ -404,15 +392,9 @@ function drawCheckpoints(ctx, path, checkpoints, W, H, ts, progress) {
         ctx.closePath();
         ctx.fill();
       });
-      ctx.shadowBlur = 0;
       ctx.restore();
 
-    } else if (cp.missed) {
-      // no residual drawing — clean disappearance
-
     } else {
-      // Inactive upcoming checkpoint — only draw if cursor hasn't passed it yet
-      if (dist <= 0) return;
       const pulse = 0.25 + 0.15 * Math.sin(ts * 0.004 + cp.x * 8);
       ctx.save();
       ctx.globalAlpha = pulse;
@@ -1126,10 +1108,6 @@ export function GameCanvas({ gaze, status }) {
         if (!cp.active && dist2 >= 0 && dist2 < W * ZONE_MAX_FRAC) {
           cp.active      = true;
           cp.windowTimer = BLINK_WINDOW;
-        }
-        // cursor flew past without activating — silently skip (no penalty, no visual)
-        if (!cp.active && dist2 < -W * 0.04) {
-          cp.missed = true;
         }
         if (cp.active) {
           cp.windowTimer -= dt;
