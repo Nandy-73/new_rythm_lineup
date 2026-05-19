@@ -1,0 +1,9 @@
+node_modules/
+frontend/node_modules/
+backend/venv/
+backend/venv310/
+__pycache__/
+*.pyc
+.DS_Store
+dist/
+data/experiment_data.xlsx
