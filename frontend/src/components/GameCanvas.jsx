@@ -21,12 +21,12 @@ const DDA_INTERVAL  = 2.0;
 const DSMOOTH_RATE  = 0.012;
 
 const CHECKPOINT_XS = [
-  0.06, 0.12, 0.18, 0.24, 0.30, 0.36, 0.42, 0.48,
+  0.12, 0.18, 0.24, 0.30, 0.36, 0.42, 0.48,
   0.54, 0.60, 0.66, 0.72, 0.78, 0.84, 0.90, 0.96,
 ];
 const CHECKPOINT_BONUS = 500;
 const MISS_PENALTY     = 200;
-const BLINK_WINDOW     = 4.5;
+const BLINK_WINDOW     = 2.0;
 const ZONE_MAX_FRAC    = 0.06;
 const SEGMENT_BONUS    = 1000;
 
@@ -219,7 +219,7 @@ function drawBlinkZone(ctx, checkpoints, W, H, ts, progress) {
   const sx   = nextCp.x * W;
   const dist = sx - cursorX;
   if (dist <= 0 || dist >= ZONE_MAX) return;
-  const urgency  = 1 - dist / ZONE_MAX;
+  const urgency  = Math.max(0, Math.min(1, 1 - nextCp.windowTimer / BLINK_WINDOW));
   const { r, g, b } = zoneColor(urgency);
   const zonePulse = 0.55 + 0.45 * Math.sin(ts * 0.014);
   const zoneLeft  = Math.max(cursorX, sx - ZONE_MAX);
@@ -423,6 +423,9 @@ function drawBlinkPrompt(ctx, W, H, checkpoints, ts) {
   const frac  = Math.max(0, cp.windowTimer / BLINK_WINDOW);
   const pulse = 0.78 + 0.22 * Math.sin(ts * 0.018);
   const textY = H * 0.82;
+  const { r, g, b } = zoneColor(1 - frac);
+  const col  = `rgb(${r},${g},${b})`;
+  const colA = `rgba(${r},${g},${b},0.25)`;
 
   ctx.save();
   ctx.textAlign = "center";
@@ -430,13 +433,13 @@ function drawBlinkPrompt(ctx, W, H, checkpoints, ts) {
   ctx.beginPath();
   ctx.roundRect(W / 2 - 210, textY - 54, 420, 72, 12);
   ctx.fill();
-  ctx.strokeStyle = "rgba(255,224,102,0.25)";
+  ctx.strokeStyle = colA;
   ctx.lineWidth   = 1;
   ctx.stroke();
 
   ctx.font        = "bold 46px monospace";
-  ctx.fillStyle   = "#ffe066";
-  ctx.shadowColor = "#ffe066";
+  ctx.fillStyle   = col;
+  ctx.shadowColor = col;
   ctx.shadowBlur  = 28;
   ctx.globalAlpha = pulse;
   ctx.fillText("BLINK  NOW!", W / 2, textY);
@@ -450,7 +453,7 @@ function drawBlinkPrompt(ctx, W, H, checkpoints, ts) {
   ctx.beginPath();
   ctx.roundRect(bx, by, bw, bh, 3);
   ctx.fill();
-  ctx.fillStyle = frac > 0.35 ? "#ffe066" : "#ff4444";
+  ctx.fillStyle = col;
   if (frac > 0) {
     ctx.beginPath();
     ctx.roundRect(bx, by, bw * frac, bh, 3);
